@@ -10,7 +10,7 @@ export async function GET(req: NextRequest) {
     const auth = getAuthUser(req);
     if (!auth) return unauthorized();
 
-    const [totalResult, todayResult, dueResult, streakResult] = await Promise.all([
+    const [totalResult, todayResult, dueResult, streakResult, userResult] = await Promise.all([
         // Total cards ever reviewed
         query<{ count: number }>(
             "SELECT COUNT(*)::int AS count FROM study_records WHERE user_id = $1",
@@ -43,12 +43,19 @@ export async function GET(req: NextRequest) {
        ORDER BY date ASC`,
             [auth.userId]
         ),
+
+        // Get user goal
+        query<{ daily_goal: number }>(
+            "SELECT COALESCE(daily_goal, 20) as daily_goal FROM users WHERE id = $1",
+            [auth.userId]
+        )
     ]);
 
     return Response.json({
         total_reviewed: totalResult.rows[0].count,
         reviewed_today: todayResult.rows[0].count,
         due_now: dueResult.rows[0].count,
+        daily_goal: userResult.rows[0]?.daily_goal ?? 20,
         daily_counts: streakResult.rows, // [{date, count}, ...]
     });
 }

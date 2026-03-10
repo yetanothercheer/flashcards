@@ -25,8 +25,7 @@ export default function FlashCard({
     const [flipped, setFlipped] = useState(false);
 
     const handleRate = (rating: 0 | 1 | 2) => {
-        setFlipped(false);
-        setTimeout(() => onRate?.(rating), 200);
+        onRate?.(rating);
     };
 
     return (

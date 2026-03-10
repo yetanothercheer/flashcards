@@ -32,50 +32,68 @@ export default function StudyPage() {
     const [fetching, setFetching] = useState(true);
     const [deckName, setDeckName] = useState("");
     const [submitting, setSubmitting] = useState(false);
+    const [exiting, setExiting] = useState(false);
+    const [mode, setMode] = useState<"standard" | "additional">("standard");
 
     useEffect(() => {
         if (!loading && !user) router.push("/login");
     }, [user, loading, router]);
 
-    const fetchDue = useCallback(async () => {
+    const fetchDue = useCallback(async (studyMode: "standard" | "additional" = "standard") => {
         setFetching(true);
-        const [deckRes, dueRes] = await Promise.all([
-            fetch(`/api/decks/${deckId}`),
-            fetch(`/api/study/${deckId}`),
-        ]);
-        if (!deckRes.ok) { router.push("/dashboard"); return; }
-        const deckData = await deckRes.json();
-        setDeckName(deckData.name);
-        if (dueRes.ok) {
-            const data = await dueRes.json();
-            setCards(data.cards);
+        setMode(studyMode);
+        try {
+            const [deckRes, dueRes] = await Promise.all([
+                fetch(`/api/decks/${deckId}`),
+                fetch(`/api/study/${deckId}${studyMode === "additional" ? "?mode=all" : ""}`),
+            ]);
+            if (!deckRes.ok) { router.push("/dashboard"); return; }
+            const deckData = await deckRes.json();
+            setDeckName(deckData.name);
+            if (dueRes.ok) {
+                const data = await dueRes.json();
+                setCards(data.cards);
+                setCurrentIdx(0);
+                setDone(0);
+            }
+        } finally {
+            setFetching(false);
         }
-        setFetching(false);
     }, [deckId, router]);
 
     useEffect(() => {
-        if (user) fetchDue();
+        if (user) fetchDue("standard");
     }, [user, fetchDue]);
 
     const handleRate = async (rating: 0 | 1 | 2) => {
         const card = cards[currentIdx];
-        if (!card || submitting) return;
+        if (!card || submitting || exiting) return;
         setSubmitting(true);
 
-        await fetch(`/api/study/${deckId}`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ card_id: card.id, rating }),
-        });
+        try {
+            await fetch(`/api/study/${deckId}`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ card_id: card.id, rating }),
+            });
 
-        setDone((d) => d + 1);
+            setDone((d) => d + 1);
+            setExiting(true);
 
-        if (currentIdx + 1 >= cards.length) {
-            setCurrentIdx(cards.length); // finished
-        } else {
-            setCurrentIdx((i) => i + 1);
+            // Wait for slide-out animation
+            setTimeout(() => {
+                setExiting(false);
+                if (currentIdx + 1 >= cards.length) {
+                    setCurrentIdx(cards.length);
+                } else {
+                    setCurrentIdx((i) => i + 1);
+                }
+                setSubmitting(false);
+            }, 300);
+        } catch (err) {
+            console.error(err);
+            setSubmitting(false);
         }
-        setSubmitting(false);
     };
 
     // Preview next-review intervals for current card
@@ -108,7 +126,7 @@ export default function StudyPage() {
                     <Link href={`/decks/${deckId}`} style={{ fontSize: "0.875rem", color: "var(--text-muted)", display: "flex", alignItems: "center", gap: 4, marginBottom: 4 }}>
                         ← {deckName}
                     </Link>
-                    <h2>学习中</h2>
+                    <h2>{mode === "additional" ? "额外学习" : "学习中"}</h2>
                 </div>
                 <div style={{ textAlign: "right" }}>
                     <div style={{ font: "700 1.5rem/1 var(--font)", color: "var(--accent)" }}>{done}</div>
@@ -133,7 +151,12 @@ export default function StudyPage() {
                     <p>你复习了 {done} 张卡片，继续保持！</p>
                     <div style={{ display: "flex", gap: 12, marginTop: 16 }}>
                         <Link href="/dashboard" className="btn btn-primary">返回首页</Link>
-                        <button className="btn btn-secondary" onClick={() => { setCards([]); setCurrentIdx(0); setDone(0); fetchDue(); }}>
+                        {mode === "standard" && (
+                            <button className="btn btn-secondary" onClick={() => fetchDue("additional")}>
+                                学习更多
+                            </button>
+                        )}
+                        <button className="btn btn-ghost" onClick={() => fetchDue("standard")}>
                             再来一轮
                         </button>
                     </div>
@@ -142,14 +165,14 @@ export default function StudyPage() {
                 <div className="empty-state animate-slideup">
                     <div style={{ fontSize: "3rem" }}>✅</div>
                     <h2>今天没有待复习的卡片</h2>
-                    <p>明天再来，或者给词书添加新单词</p>
+                    <p>继续学习新单词或者复习已认识的单词</p>
                     <div style={{ display: "flex", gap: 12, marginTop: 16 }}>
-                        <Link href="/dashboard" className="btn btn-primary">返回词书</Link>
+                        <button className="btn btn-primary" onClick={() => fetchDue("additional")}>额外学习</button>
                         <Link href={`/decks/${deckId}`} className="btn btn-secondary">管理词书</Link>
                     </div>
                 </div>
             ) : current ? (
-                <div className="animate-fadein" key={currentIdx}>
+                <div className={exiting ? "animate-slideout" : "animate-slidein"} key={currentIdx}>
                     <FlashCard
                         front={current.front}
                         back={current.back}

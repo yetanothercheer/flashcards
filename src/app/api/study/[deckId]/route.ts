@@ -16,6 +16,18 @@ export async function GET(req: NextRequest, { params }: Params) {
     if (!auth) return unauthorized();
 
     const { deckId } = await params;
+    const { searchParams } = new URL(req.url);
+    const mode = searchParams.get("mode");
+
+    let whereClause = "AND (sr.next_review_at IS NULL OR sr.next_review_at <= NOW())";
+    let limitClause = "";
+
+    if (mode === "all") {
+        // Fetch cards that are NOT due yet (or all cards) to allow "extra study"
+        // We prioritize ones that haven't been reviewed for the longest time
+        whereClause = "";
+        limitClause = "LIMIT 20";
+    }
 
     const result = await query(
         `SELECT
@@ -27,8 +39,9 @@ export async function GET(req: NextRequest, { params }: Params) {
      LEFT JOIN study_records sr ON sr.card_id = c.id AND sr.user_id = $1
      WHERE d.id = $2
        AND d.user_id = $1
-       AND (sr.next_review_at IS NULL OR sr.next_review_at <= NOW())
-     ORDER BY sr.next_review_at ASC NULLS FIRST`,
+       ${whereClause}
+     ORDER BY sr.next_review_at ASC NULLS FIRST
+     ${limitClause}`,
         [auth.userId, deckId]
     );
 

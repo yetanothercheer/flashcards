@@ -22,6 +22,7 @@ interface Stats {
     total_reviewed: number;
     reviewed_today: number;
     due_now: number;
+    daily_goal: number;
     daily_counts: { date: string; count: number }[];
 }
 
@@ -33,6 +34,8 @@ export default function DashboardPage() {
     const [fetching, setFetching] = useState(true);
     const [showCreate, setShowCreate] = useState(false);
     const [showImportNew, setShowImportNew] = useState(false);
+    const [editingGoal, setEditingGoal] = useState(false);
+    const [goalInput, setGoalInput] = useState("");
 
     useEffect(() => {
         if (!loading && !user) router.push("/login");
@@ -45,13 +48,31 @@ export default function DashboardPage() {
             fetch("/api/study/stats"),
         ]);
         if (decksRes.ok) setDecks(await decksRes.json());
-        if (statsRes.ok) setStats(await statsRes.json());
+        if (statsRes.ok) {
+            const data = await statsRes.json();
+            setStats(data);
+            setGoalInput(data.daily_goal.toString());
+        }
         setFetching(false);
     }, []);
 
     useEffect(() => {
         if (user) fetchData();
     }, [user, fetchData]);
+
+    const handleUpdateGoal = async () => {
+        const val = parseInt(goalInput);
+        if (isNaN(val) || val <= 0) return;
+        try {
+            await fetch("/api/auth/me", {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ daily_goal: val }),
+            });
+            setStats(prev => prev ? { ...prev, daily_goal: val } : null);
+            setEditingGoal(false);
+        } catch (err) { console.error(err); }
+    };
 
     const handleDeckCreated = (deck: Deck) => {
         setDecks((prev) => [deck, ...prev]);
@@ -65,6 +86,7 @@ export default function DashboardPage() {
     if (loading || !user) return null;
 
     const totalDue = decks.reduce((s, d) => s + d.due_count, 0);
+    const goalProgress = stats ? Math.min(100, Math.round((stats.reviewed_today / stats.daily_goal) * 100)) : 0;
 
     return (
         <div className="page">
@@ -99,20 +121,47 @@ export default function DashboardPage() {
 
             {/* Stats bar */}
             {stats && (
-                <div style={{
-                    display: "grid", gridTemplateColumns: "repeat(3, 1fr)",
-                    gap: 12, marginBottom: 32,
-                }}>
-                    {[
-                        { label: "今日复习", value: stats.reviewed_today, color: "var(--accent)" },
-                        { label: "总计复习", value: stats.total_reviewed, color: "var(--success)" },
-                        { label: "待复习", value: stats.due_now, color: stats.due_now > 0 ? "var(--warning)" : "var(--text-muted)" },
-                    ].map((s) => (
-                        <div key={s.label} className="card" style={{ padding: "20px 24px" }}>
-                            <div className="stat-value" style={{ color: s.color }}>{s.value}</div>
-                            <div className="stat-label">{s.label}</div>
+                <div style={{ marginBottom: 32 }}>
+                    <div style={{
+                        display: "grid", gridTemplateColumns: "repeat(4, 1fr)",
+                        gap: 12, marginBottom: 16,
+                    }}>
+                        {[
+                            { label: "今日复习", value: stats.reviewed_today, color: "var(--accent)" },
+                            { label: "今日目标", value: stats.daily_goal, color: "var(--text-secondary)", onClick: () => setEditingGoal(true) },
+                            { label: "总计复习", value: stats.total_reviewed, color: "var(--success)" },
+                            { label: "待复习", value: stats.due_now, color: stats.due_now > 0 ? "var(--warning)" : "var(--text-muted)" },
+                        ].map((s) => (
+                            <div key={s.label} className="card" style={{ padding: "20px 24px", cursor: s.onClick ? "pointer" : "default" }} onClick={s.onClick}>
+                                <div className="stat-value" style={{ color: s.color }}>{s.value}</div>
+                                <div className="stat-label">{s.label} {s.onClick && "✎"}</div>
+                            </div>
+                        ))}
+                    </div>
+
+                    {/* Progress Bar Label */}
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.8rem", marginBottom: 6, color: "var(--text-secondary)" }}>
+                        <span>今日目标完成度 {goalProgress}%</span>
+                        <span>{stats.reviewed_today} / {stats.daily_goal}</span>
+                    </div>
+                    <div className="progress-bar">
+                        <div className="progress-bar-fill" style={{ width: `${goalProgress}%` }} />
+                    </div>
+
+                    {editingGoal && (
+                        <div className="card" style={{ marginTop: 12, padding: 16, display: "flex", alignItems: "center", gap: 12 }}>
+                            <span style={{ fontSize: "0.875rem" }}>设置每日复习目标：</span>
+                            <input
+                                className="input"
+                                style={{ width: 80, height: 36 }}
+                                type="number"
+                                value={goalInput}
+                                onChange={(e) => setGoalInput(e.target.value)}
+                            />
+                            <button className="btn btn-primary btn-sm" onClick={handleUpdateGoal}>确认</button>
+                            <button className="btn btn-ghost btn-sm" onClick={() => setEditingGoal(false)}>取消</button>
                         </div>
-                    ))}
+                    )}
                 </div>
             )}
 

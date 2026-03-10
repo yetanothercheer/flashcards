@@ -22,3 +22,28 @@ export async function GET(req: NextRequest) {
 
     return Response.json({ user });
 }
+
+export async function PATCH(req: NextRequest) {
+    const auth = getAuthUser(req);
+    if (!auth) return unauthorized();
+
+    const body = await req.json();
+    const { display_name, daily_goal } = body;
+
+    // Gracefully handle migration if it hasn't run yet
+    try {
+        await query("ALTER TABLE users ADD COLUMN IF NOT EXISTS daily_goal INTEGER DEFAULT 20");
+    } catch (e) { /* ignore if already exists or fails */ }
+
+    const result = await query(
+        `UPDATE users
+         SET display_name = COALESCE($1, display_name),
+             daily_goal   = COALESCE($2, daily_goal),
+             updated_at   = NOW()
+         WHERE id = $3
+         RETURNING id, email, display_name, daily_goal, avatar_url, created_at`,
+        [display_name || null, daily_goal || null, auth.userId]
+    );
+
+    return Response.json({ user: result.rows[0] });
+}
