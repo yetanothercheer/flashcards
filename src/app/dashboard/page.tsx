@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
@@ -32,6 +32,7 @@ export default function DashboardPage() {
     const [stats, setStats] = useState<Stats | null>(null);
     const [fetching, setFetching] = useState(true);
     const [showCreate, setShowCreate] = useState(false);
+    const [showImportNew, setShowImportNew] = useState(false);
 
     useEffect(() => {
         if (!loading && !user) router.push("/login");
@@ -57,6 +58,10 @@ export default function DashboardPage() {
         setShowCreate(false);
     };
 
+    const handleImportCreated = (deckId: string) => {
+        router.push(`/decks/${deckId}`);
+    };
+
     if (loading || !user) return null;
 
     const totalDue = decks.reduce((s, d) => s + d.due_count, 0);
@@ -74,13 +79,22 @@ export default function DashboardPage() {
                             : "今天没有待复习的内容 🎉"}
                     </p>
                 </div>
-                <button
-                    id="create-deck-btn"
-                    className="btn btn-primary"
-                    onClick={() => setShowCreate(true)}
-                >
-                    + 新建词书
-                </button>
+                <div style={{ display: "flex", gap: 10 }}>
+                    <button
+                        id="import-csv-btn"
+                        className="btn btn-secondary"
+                        onClick={() => setShowImportNew(true)}
+                    >
+                        ↑ 从 CSV 导入
+                    </button>
+                    <button
+                        id="create-deck-btn"
+                        className="btn btn-primary"
+                        onClick={() => setShowCreate(true)}
+                    >
+                        + 新建词书
+                    </button>
+                </div>
             </div>
 
             {/* Stats bar */}
@@ -112,8 +126,9 @@ export default function DashboardPage() {
                     <div className="empty-state-icon">📚</div>
                     <h3>还没有词书</h3>
                     <p>新建一个词书，或者去词库浏览并 Fork 一份</p>
-                    <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
+                    <div style={{ display: "flex", gap: 10, marginTop: 8, flexWrap: "wrap", justifyContent: "center" }}>
                         <button className="btn btn-primary" onClick={() => setShowCreate(true)}>新建词书</button>
+                        <button className="btn btn-secondary" onClick={() => setShowImportNew(true)}>↑ 从 CSV 导入</button>
                         <Link href="/library" className="btn btn-secondary">浏览词库</Link>
                     </div>
                 </div>
@@ -131,6 +146,114 @@ export default function DashboardPage() {
                     onCreated={handleDeckCreated}
                 />
             )}
+            {showImportNew && (
+                <ImportFromCSVModal
+                    onClose={() => setShowImportNew(false)}
+                    onCreated={handleImportCreated}
+                />
+            )}
+        </div>
+    );
+}
+
+// ── Import-from-CSV Modal (creates a new deck) ──────────────────────────────
+
+function ImportFromCSVModal({ onClose, onCreated }: { onClose: () => void; onCreated: (deckId: string) => void }) {
+    const [name, setName] = useState("");
+    const [file, setFile] = useState<File | null>(null);
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState("");
+    const fileInputRef = useRef<HTMLInputElement>(null);
+
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!file || !name.trim()) return;
+        setLoading(true);
+        setError("");
+        const form = new FormData();
+        form.append("name", name.trim());
+        form.append("file", file);
+        try {
+            const res = await fetch("/api/decks/new/import", { method: "POST", body: form });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error ?? "导入失败");
+            onCreated(data.deck_id);
+        } catch (err) {
+            setError(err instanceof Error ? err.message : "导入失败");
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    return (
+        <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
+            <div className="modal">
+                <h2 className="modal-title">从 CSV 创建词书</h2>
+                <p style={{ fontSize: "0.875rem", marginBottom: 20, color: "var(--text-secondary)" }}>
+                    CSV 格式：<code style={{ background: "var(--bg-elevated)", padding: "2px 6px", borderRadius: 4 }}>单词, 释义, 例句（可选）</code>
+                </p>
+                {error && <div className="alert alert-error">{error}</div>}
+                <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                    <div className="field">
+                        <label className="label" htmlFor="import-deck-name">词书名称 *</label>
+                        <input
+                            id="import-deck-name"
+                            className="input"
+                            placeholder="例如：GRE 核心词汇"
+                            value={name}
+                            onChange={(e) => setName(e.target.value)}
+                            required
+                            autoFocus
+                        />
+                    </div>
+
+                    <div
+                        style={{
+                            border: `2px dashed ${file ? "var(--accent)" : "var(--border)"}`,
+                            borderRadius: "var(--radius-md)",
+                            padding: "24px 16px",
+                            textAlign: "center",
+                            cursor: "pointer",
+                            transition: "border-color var(--transition), background var(--transition)",
+                            background: file ? "var(--accent-soft)" : "transparent",
+                        }}
+                        onClick={() => fileInputRef.current?.click()}
+                    >
+                        <input
+                            ref={fileInputRef}
+                            type="file"
+                            accept=".csv"
+                            id="import-csv-file"
+                            style={{ display: "none" }}
+                            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+                        />
+                        <div style={{ fontSize: "1.75rem", marginBottom: 6 }}>{file ? "✅" : "📄"}</div>
+                        <div style={{ fontWeight: 600, fontSize: "0.9rem", marginBottom: 2 }}>
+                            {file ? file.name : "点击选择 CSV 文件"}
+                        </div>
+                        {file && (
+                            <div style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>
+                                {(file.size / 1024).toFixed(1)} KB
+                            </div>
+                        )}
+                        {!file && (
+                            <div style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>支持标准 CSV 格式，含引号转义</div>
+                        )}
+                    </div>
+
+                    <div style={{ display: "flex", gap: 10 }}>
+                        <button type="button" className="btn btn-secondary" style={{ flex: 1 }} onClick={onClose}>取消</button>
+                        <button
+                            type="submit"
+                            className="btn btn-primary"
+                            style={{ flex: 1 }}
+                            disabled={!file || !name.trim() || loading}
+                        >
+                            {loading ? <span className="spinner" /> : "创建并导入"}
+                        </button>
+                    </div>
+                </form>
+            </div>
         </div>
     );
 }
